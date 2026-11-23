@@ -4,4 +4,7 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Solo en desarrollo: permite HTTP sin cifrar hacia el gateway local (PC o 192.168.80.27).
+         La version de produccion usa https://sp-parqueaderos.com y no lo necesita. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

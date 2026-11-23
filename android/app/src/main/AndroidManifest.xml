@@ -1,9 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- La app consume el API Gateway. usesCleartextTraffic permite HTTP local en desarrollo; quitarlo con HTTPS en produccion. -->
+    <!-- La app consume el API Gateway (en produccion https://sp-parqueaderos.com/api). -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="SP Parqueaderos"
-        android:usesCleartextTraffic="true"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

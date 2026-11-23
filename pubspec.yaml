@@ -1,7 +1,7 @@
 name: mobile_parking_sp
 description: App movil de SP Parqueaderos (operacion de portería y caja).
 publish_to: 'none'
-version: 0.1.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
