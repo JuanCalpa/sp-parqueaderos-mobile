@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/api/parking_api.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
@@ -30,6 +31,8 @@ class MainShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
+    // Carga el catalogo de tipos de vehiculo del parqueadero (incluye los agregados en Configuracion).
+    ref.watch(vehicleCatalogProvider);
     final index = _tabs.indexWhere((tab) => location.startsWith(tab.path));
     return Scaffold(
       appBar: AppBar(

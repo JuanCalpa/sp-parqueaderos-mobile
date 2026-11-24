@@ -65,6 +65,8 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
         _board = results[1] as ResourceBoard;
         _monthly = results[2] as List<MonthlySubscription>;
         _rules = results[3] as List<PricingRule>;
+        // Si el tipo seleccionado fue eliminado en Configuracion (p. ej. Carro), se usa el primero activo.
+        if (vehicleTypes.isNotEmpty && !vehicleTypes.any((type) => type.type == _vehicleType)) _vehicleType = vehicleTypes.first.type;
         _error = null;
         _loading = false;
         _suggestSpace();
@@ -276,15 +278,15 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
               ]),
               const SizedBox(height: 12),
               SectionTitle('Tipo de vehículo', icon: Icons.warning_amber_rounded, trailing: StatusChip.muted(_rateLabel)),
-              Row(children: [
-                for (final type in vehicleTypes)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: _TypeTile(meta: type, selected: type.type == _vehicleType, onTap: () => _selectType(type.type)),
-                    ),
-                  ),
-              ]),
+              // 4 tipos por fila; con los tipos agregados en Configuracion la cuadricula crece hacia abajo.
+              LayoutBuilder(builder: (context, constraints) {
+                const gap = 6.0;
+                final width = (constraints.maxWidth - gap * 3) / 4;
+                return Wrap(spacing: gap, runSpacing: gap, children: [
+                  for (final type in vehicleTypes)
+                    SizedBox(width: width, child: _TypeTile(meta: type, selected: type.type == _vehicleType, onTap: () => _selectType(type.type))),
+                ]);
+              }),
               const SizedBox(height: 14),
               SpCard(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -478,7 +480,11 @@ class _TypeTile extends StatelessWidget {
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(meta.icon, size: 26, color: selected ? Colors.white : AppColors.textSecondary),
             const SizedBox(height: 4),
-            Text(meta.label, style: AppText.sans(size: 12, weight: FontWeight.w700, color: selected ? Colors.white : AppColors.textSecondary)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(meta.label, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+                  style: AppText.sans(size: 12, weight: FontWeight.w700, color: selected ? Colors.white : AppColors.textSecondary)),
+            ),
           ]),
         ),
       ),

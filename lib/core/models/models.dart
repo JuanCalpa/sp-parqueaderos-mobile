@@ -269,6 +269,10 @@ class PricingRule {
   final double? rateIncreaseAmount;
   final double? lostTicketFee;
   final bool active;
+  /// CAR = espacios de carro y llaves; MOTORCYCLE = espacios de moto y cascos.
+  final String category;
+  /// true = tipo agregado por el parqueadero (se puede cambiar su categoria); false = uno de los 4 basicos.
+  final bool custom;
   const PricingRule({
     required this.vehicleType,
     required this.displayName,
@@ -282,7 +286,12 @@ class PricingRule {
     this.rateIncreaseAmount,
     this.lostTicketFee,
     this.active = true,
+    this.category = 'CAR',
+    this.custom = false,
   });
+
+  /// Tipo nuevo: todavia no tiene codigo (lo genera el servidor a partir del nombre).
+  bool get isNew => vehicleType.isEmpty;
 
   factory PricingRule.fromJson(Map<String, dynamic> json) => PricingRule(
         vehicleType: '${json['vehicleType']}',
@@ -297,6 +306,8 @@ class PricingRule {
         rateIncreaseAmount: _optNum(json['rateIncreaseAmount']),
         lostTicketFee: _optNum(json['lostTicketFee']),
         active: json['active'] != false,
+        category: '${json['category'] ?? (const ['MOTORCYCLE', 'BICYCLE'].contains(json['vehicleType']) ? 'MOTORCYCLE' : 'CAR')}',
+        custom: json['custom'] == true,
       );
 
   /// Mismo cuerpo que envia la web al guardar (PUT /pricing/rules/{vehicleType}).
@@ -313,6 +324,21 @@ class PricingRule {
         'rateIncreaseAmount': rateIncreaseAmount,
         'lostTicketFee': lostTicketFee,
         'active': active,
+        // La categoria solo se puede cambiar en los tipos agregados; los basicos la tienen fija.
+        'category': custom ? category : null,
+      };
+
+  /// Cuerpo para crear un tipo nuevo (POST /pricing/rules); el codigo lo genera el servidor.
+  Map<String, dynamic> toCreateJson() => {
+        'displayName': displayName,
+        'category': category,
+        'pricingModel': pricingModel,
+        'flatAmount': flatAmount,
+        'hourlyAmount': hourlyAmount,
+        'additionalHourAmount': additionalHourAmount ?? hourlyAmount,
+        'dayAmount': dayAmount,
+        'applyDailyCap': applyDailyCap,
+        'lostTicketFee': lostTicketFee,
       };
 
   bool get flat => pricingModel == 'FLAT';

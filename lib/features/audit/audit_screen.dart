@@ -30,6 +30,8 @@ const _actions = <String, _ActionMeta>{
   'CASH_OPEN': _ActionMeta('Apertura de caja', _Tone.blue, Icons.lock_open_outlined),
   'CASH_CLOSE': _ActionMeta('Cierre de caja', _Tone.blue, Icons.point_of_sale_outlined),
   'TARIFF_UPDATE': _ActionMeta('Tarifa modificada', _Tone.amber, Icons.sell_outlined),
+  'VEHICLE_TYPE_CREATE': _ActionMeta('Tipo de vehículo agregado', _Tone.green, Icons.add_circle_outline),
+  'VEHICLE_TYPE_DELETE': _ActionMeta('Tipo de vehículo eliminado', _Tone.red, Icons.delete_outline),
   'BRANCH_UPDATE': _ActionMeta('Configuración de sede', _Tone.amber, Icons.storefront_outlined),
   'MEMBER_ADD': _ActionMeta('Usuario agregado', _Tone.green, Icons.person_add_alt),
   'MEMBER_UPDATE': _ActionMeta('Usuario modificado', _Tone.amber, Icons.manage_accounts_outlined),

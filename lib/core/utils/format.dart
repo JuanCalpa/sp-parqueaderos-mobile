@@ -64,20 +64,59 @@ class VehicleMeta {
   final String type;
   final String label;
   final IconData icon;
-  const VehicleMeta(this.type, this.label, this.icon);
+  /// CAR = espacios de carro y tablero de llaves; MOTORCYCLE = espacios de moto y casilleros de casco.
+  final String category;
+  const VehicleMeta(this.type, this.label, this.icon, [this.category = 'CAR']);
 
-  /// Motos y bicicletas usan espacios de moto y casilleros de casco; carros y carga, espacios de carro y llaves.
-  bool get compact => type == 'MOTORCYCLE' || type == 'BICYCLE';
-  int get maxHelmets => type == 'MOTORCYCLE' ? 2 : 1;
+  /// Se parquea en espacios de moto y guarda cascos: moto, bicicleta y los tipos creados "como moto".
+  bool get compact => category == 'MOTORCYCLE';
+  /// La bicicleta deja un casco; las motos y los tipos "como moto", hasta dos.
+  int get maxHelmets => type == 'BICYCLE' ? 1 : 2;
+  /// true = tipo agregado por el parqueadero en Configuracion.
+  bool get custom => !_baseTypes.any((base) => base.type == type);
 }
 
-const vehicleTypes = <VehicleMeta>[
-  VehicleMeta('CAR', 'Carro', Icons.directions_car_filled_outlined),
-  VehicleMeta('MOTORCYCLE', 'Moto', Icons.two_wheeler),
-  VehicleMeta('HEAVY', 'Carga', Icons.local_shipping_outlined),
-  VehicleMeta('BICYCLE', 'Bicicleta', Icons.pedal_bike),
+/// Los 4 tipos con los que nace todo parqueadero.
+const _baseTypes = <VehicleMeta>[
+  VehicleMeta('CAR', 'Carro', Icons.directions_car_filled_outlined, 'CAR'),
+  VehicleMeta('MOTORCYCLE', 'Moto', Icons.two_wheeler, 'MOTORCYCLE'),
+  VehicleMeta('HEAVY', 'Carga', Icons.local_shipping_outlined, 'CAR'),
+  VehicleMeta('BICYCLE', 'Bicicleta', Icons.pedal_bike, 'MOTORCYCLE'),
 ];
 
-VehicleMeta vehicleMeta(String? type) => vehicleTypes.firstWhere((item) => item.type == type, orElse: () => vehicleTypes.first);
+/// Tipos activos del parqueadero, en orden. Empieza con los 4 basicos y se reemplaza con el catalogo
+/// de tarifas del servidor (registerVehicleTypes), que incluye los tipos agregados en Configuracion.
+final List<VehicleMeta> vehicleTypes = List.of(_baseTypes);
+
+/// Todos los tipos conocidos, incluidos los ya eliminados: el historial sigue mostrando su nombre.
+final Map<String, VehicleMeta> _knownTypes = {for (final type in _baseTypes) type.type: type};
+
+/// Carga el catalogo del parqueadero: [code, nombre, categoria] de cada tipo activo.
+void registerVehicleTypes(Iterable<(String, String, String)> catalog) {
+  final items = catalog.toList();
+  if (items.isEmpty) return;
+  final active = <VehicleMeta>[];
+  for (final (code, name, category) in items) {
+    final base = _baseTypes.where((item) => item.type == code).firstOrNull;
+    final moto = category == 'MOTORCYCLE';
+    final meta = base ?? VehicleMeta(code, name, moto ? Icons.electric_scooter : Icons.airport_shuttle_outlined, moto ? 'MOTORCYCLE' : 'CAR');
+    _knownTypes[code] = meta;
+    active.add(meta);
+  }
+  vehicleTypes
+    ..clear()
+    ..addAll(active);
+}
+
+/// CAMIONETA_4X4 -> Camioneta 4x4 (para tipos que no estan en el catalogo cargado).
+String _humanize(String code) {
+  final text = code.replaceAll('_', ' ').toLowerCase();
+  return text.isEmpty ? 'Vehículo' : text[0].toUpperCase() + text.substring(1);
+}
+
+VehicleMeta vehicleMeta(String? type) {
+  final code = type ?? 'CAR';
+  return _knownTypes[code] ?? VehicleMeta(code, _humanize(code), Icons.directions_car_outlined);
+}
 
 String paymentLabel(String? method) => method == 'ONLINE' ? 'En línea' : 'Efectivo';

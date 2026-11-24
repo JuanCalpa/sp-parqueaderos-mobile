@@ -3,9 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../config/env.dart';
 import '../models/models.dart';
+import '../utils/format.dart';
 import 'api_exception.dart';
 
 final parkingApiProvider = Provider<ParkingApi>((ref) => ParkingApi(ref.read(authProvider)));
+
+/// Catalogo de tipos de vehiculo del parqueadero activo. Se carga al entrar (y al cambiar de parqueadero)
+/// para que todas las pantallas muestren los tipos agregados en Configuracion.
+final vehicleCatalogProvider = FutureProvider<List<PricingRule>>((ref) {
+  ref.watch(authProvider.select((auth) => auth.tenantUuid));
+  return ref.read(parkingApiProvider).pricingRules();
+});
 
 /// Llamadas a los microservicios a traves del API Gateway. Agrega el token y el parqueadero activo
 /// (X-Tenant-Id) a cada peticion, igual que el interceptor de la web.
@@ -125,12 +133,24 @@ class ParkingApi {
 
   // ---------- Tarifas ----------
 
-  Future<List<PricingRule>> pricingRules() => _call(() => _dio.get('${Env.pricingApi}/pricing/rules'),
-      (data) => _list(_map(data)['rules']).map(PricingRule.fromJson).toList(), 'No se pudieron cargar las tarifas');
+  /// Tarifas y tipos de vehiculo activos. Tambien actualiza los tipos que muestra toda la app.
+  Future<List<PricingRule>> pricingRules() => _call(() => _dio.get('${Env.pricingApi}/pricing/rules'), (data) {
+        final rules = _list(_map(data)['rules']).map(PricingRule.fromJson).toList();
+        registerVehicleTypes(rules.map((rule) => (rule.vehicleType, rule.displayName, rule.category)));
+        return rules;
+      }, 'No se pudieron cargar las tarifas');
 
   /// Solo propietario y administrador (el servidor responde 403 a un cajero).
   Future<PricingRule> savePricingRule(PricingRule rule) => _call(() => _dio.put('${Env.pricingApi}/pricing/rules/${rule.vehicleType}', data: rule.toJson()),
       (data) => PricingRule.fromJson(_map(data)), 'No se pudo guardar la tarifa');
+
+  /// Agrega un tipo de vehiculo ("como carro" o "como moto") con su tarifa. Solo propietario y administrador.
+  Future<PricingRule> createVehicleType(PricingRule draft) => _call(() => _dio.post('${Env.pricingApi}/pricing/rules', data: draft.toCreateJson()),
+      (data) => PricingRule.fromJson(_map(data)), 'No se pudo agregar el tipo de vehículo');
+
+  /// Elimina (desactiva) un tipo. El servidor lo rechaza si hay vehiculos adentro o mensualidades vigentes.
+  Future<void> deleteVehicleType(String vehicleType) => _call(() => _dio.delete('${Env.pricingApi}/pricing/rules/$vehicleType'),
+      (_) {}, 'No se pudo eliminar el tipo de vehículo');
 
   Future<PricingCalculation> calculate(Ticket ticket) => _call(
         () => _dio.post('${Env.pricingApi}/pricing/calculate', data: {

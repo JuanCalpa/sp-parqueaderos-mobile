@@ -35,10 +35,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final api = ref.read(parkingApiProvider);
     try {
       final results = await Future.wait<Object?>([api.pricingRules(), api.currentBranch().catchError((_) => null)]);
+      // El servidor ya los entrega en orden: los 4 basicos y despues los agregados.
       final rules = results[0] as List<PricingRule>;
-      // Mismo orden que el selector de la entrada: carro, moto, carga, bicicleta.
-      final order = vehicleTypes.map((item) => item.type).toList();
-      rules.sort((a, b) => order.indexOf(a.vehicleType).compareTo(order.indexOf(b.vehicleType)));
       if (mounted) {
         setState(() {
           _rules = rules;
@@ -57,7 +55,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final saved = await Navigator.of(context).push<PricingRule>(MaterialPageRoute(builder: (_) => TariffEditorScreen(rule: rule)));
     if (saved == null || !mounted) return;
     setState(() => _rules = [for (final item in _rules) item.vehicleType == saved.vehicleType ? saved : item]);
+    _syncCatalog();
     showMessage(context, 'Tarifa de ${saved.displayName} actualizada');
+  }
+
+  /// Nuevo tipo de vehiculo: el mismo editor de tarifa, vacio y con la categoria.
+  Future<void> _create() async {
+    const draft = PricingRule(vehicleType: '', displayName: '', pricingModel: 'PROGRESSIVE', category: 'CAR', custom: true);
+    final created = await Navigator.of(context).push<PricingRule>(MaterialPageRoute(builder: (_) => const TariffEditorScreen(rule: draft)));
+    if (created == null || !mounted) return;
+    setState(() => _rules = [..._rules, created]);
+    _syncCatalog();
+    showMessage(context, 'Tipo "${created.displayName}" agregado. Ya aparece al registrar entradas');
+  }
+
+  /// Elimina (desactiva) un tipo. El servidor lo rechaza si hay vehiculos adentro o mensualidades vigentes.
+  Future<void> _delete(PricingRule rule) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: Text('¿Eliminar "${rule.displayName}"?', style: AppText.headline),
+        content: Text('Dejará de aparecer al registrar entradas y mensualidades. Los tickets y reportes anteriores conservan su nombre.',
+            style: AppText.sans(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.primary), onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ref.read(parkingApiProvider).deleteVehicleType(rule.vehicleType);
+      if (!mounted) return;
+      setState(() => _rules = _rules.where((item) => item.vehicleType != rule.vehicleType).toList());
+      _syncCatalog();
+      showMessage(context, 'Tipo "${rule.displayName}" eliminado');
+    } on ApiException catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    }
+  }
+
+  /// Los tipos que muestra la app (entrada, tickets...) siguen el catalogo de esta pantalla.
+  void _syncCatalog() {
+    registerVehicleTypes(_rules.map((rule) => (rule.vehicleType, rule.displayName, rule.category)));
   }
 
   @override
@@ -90,10 +131,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ]),
           ),
           const SizedBox(height: 16),
-          SectionTitle('Tarifas por tipo de vehículo', trailing: Text('${_rules.length} tipos', style: AppText.mono(size: 12, weight: FontWeight.w600, color: AppColors.textMuted))),
+          SectionTitle('Tarifas y tipos de vehículo', trailing: Text('${_rules.length} tipos', style: AppText.mono(size: 12, weight: FontWeight.w600, color: AppColors.textMuted))),
           if (_error != null) ErrorPanel(_error!, onRetry: _load),
           if (_error == null && _rules.isEmpty) SpCard(child: Text('No hay tarifas configuradas.', style: AppText.sans(color: AppColors.textMuted))),
-          for (final rule in _rules) Padding(padding: const EdgeInsets.only(bottom: 10), child: _TariffCard(rule: rule, onEdit: () => _edit(rule))),
+          for (final rule in _rules)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _TariffCard(rule: rule, onEdit: () => _edit(rule), onDelete: _rules.length > 1 ? () => _delete(rule) : null),
+            ),
+          GhostButton(label: 'Agregar tipo de vehículo', icon: Icons.add, color: AppColors.primary, onPressed: _create),
+          const SizedBox(height: 12),
           const SizedBox(height: 6),
           SpCard(
             color: AppColors.blueLight,
@@ -117,7 +164,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 class _TariffCard extends StatelessWidget {
   final PricingRule rule;
   final VoidCallback onEdit;
-  const _TariffCard({required this.rule, required this.onEdit});
+  /// null = no se puede eliminar (es el ultimo tipo que queda).
+  final VoidCallback? onDelete;
+  const _TariffCard({required this.rule, required this.onEdit, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -135,10 +184,11 @@ class _TariffCard extends StatelessWidget {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(rule.displayName, style: AppText.headline, maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text(rule.flat ? 'Tarifa plana' : 'Primera hora + adicional', style: AppText.mono(size: 11, weight: FontWeight.w500, color: AppColors.textMuted)),
+              Text(meta.compact ? 'Espacios de moto · cascos' : 'Espacios de carro · llaves',
+                  style: AppText.mono(size: 11, weight: FontWeight.w500, color: AppColors.textMuted)),
             ]),
           ),
-          rule.active ? const StatusChip('Activa') : const StatusChip.muted('Inactiva'),
+          rule.custom ? const StatusChip.blue('Agregado') : const StatusChip('Básico'),
         ]),
         const SizedBox(height: 12),
         Container(
@@ -164,7 +214,26 @@ class _TariffCard extends StatelessWidget {
                 ]),
         ),
         const SizedBox(height: 12),
-        GhostButton(label: 'Editar tarifa', icon: Icons.edit_outlined, onPressed: onEdit),
+        Row(children: [
+          Expanded(child: GhostButton(label: rule.flat ? 'Editar (tarifa plana)' : 'Editar tarifa', icon: Icons.edit_outlined, onPressed: onEdit)),
+          if (onDelete != null) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 52,
+              height: 46,
+              child: OutlinedButton(
+                onPressed: onDelete,
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primaryBorder),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                ),
+                child: const Icon(Icons.delete_outline, semanticLabel: 'Eliminar tipo'),
+              ),
+            ),
+          ],
+        ]),
       ]),
     );
   }
@@ -204,6 +273,8 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
   late final _flatAmount = TextEditingController(text: _text(widget.rule.flatAmount));
   late bool _flat = widget.rule.flat;
   late bool _cap = widget.rule.applyDailyCap;
+  /// CAR (como carro) o MOTORCYCLE (como moto): se elige al crear y se puede cambiar en los tipos agregados.
+  late String _category = widget.rule.category;
   bool _saving = false;
 
   static String _text(double? value) => value == null ? '' : value.round().toString();
@@ -227,7 +298,9 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
 
   PricingRule get _draft => PricingRule(
         vehicleType: widget.rule.vehicleType,
-        displayName: _name.text.trim().isEmpty ? vehicleMeta(widget.rule.vehicleType).label : _name.text.trim(),
+        displayName: _name.text.trim().isEmpty && !widget.rule.isNew ? vehicleMeta(widget.rule.vehicleType).label : _name.text.trim(),
+        category: _category,
+        custom: widget.rule.custom,
         pricingModel: _flat ? 'FLAT' : 'PROGRESSIVE',
         flatAmount: _value(_flatAmount),
         hourlyAmount: _value(_hourly),
@@ -242,6 +315,7 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
       );
 
   String? _validate(PricingRule rule) {
+    if (rule.isNew && rule.displayName.isEmpty) return 'Ingrese el nombre del tipo de vehículo';
     if (rule.flat) return (rule.flatAmount ?? 0) > 0 ? null : 'Ingrese el valor de la tarifa plana';
     if ((rule.hourlyAmount ?? 0) <= 0) return 'Ingrese el valor de la primera hora';
     if (rule.additionalHourAmount == null || rule.additionalHourAmount! < 0) return 'Ingrese el valor de la hora adicional';
@@ -258,7 +332,8 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
     }
     setState(() => _saving = true);
     try {
-      final saved = await ref.read(parkingApiProvider).savePricingRule(rule);
+      final api = ref.read(parkingApiProvider);
+      final saved = rule.isNew ? await api.createVehicleType(rule) : await api.savePricingRule(rule);
       if (mounted) Navigator.of(context).pop(saved);
     } on ApiException catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
@@ -269,11 +344,12 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final meta = vehicleMeta(widget.rule.vehicleType);
+    final creating = widget.rule.isNew;
+    final meta = vehicleMeta(creating ? (_category == 'MOTORCYCLE' ? 'MOTORCYCLE' : 'CAR') : widget.rule.vehicleType);
     final draft = _draft;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Tarifa · ${meta.label}'),
+        title: Text(creating ? 'Nuevo tipo de vehículo' : 'Tarifa · ${meta.label}'),
         leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
       ),
       body: ListView(
@@ -281,9 +357,40 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
         children: [
           SpCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              SectionTitle('Datos de la tarifa', icon: meta.icon),
-              const FieldLabel('Nombre visible'),
-              TextField(controller: _name, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(hintText: meta.label)),
+              SectionTitle(creating ? 'Datos del tipo' : 'Datos de la tarifa', icon: meta.icon),
+              // Categoria: al crear y en tipos agregados; los 4 basicos la tienen fija.
+              if (creating || widget.rule.custom) ...[
+                const FieldLabel('¿Cómo se parquea? *'),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(
+                    child: _CategoryOption(
+                      icon: Icons.airport_shuttle_outlined,
+                      title: 'Como carro',
+                      detail: 'Espacios de carro y tablero de llaves',
+                      selected: _category != 'MOTORCYCLE',
+                      onTap: () => setState(() => _category = 'CAR'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CategoryOption(
+                      icon: Icons.electric_scooter,
+                      title: 'Como moto',
+                      detail: 'Espacios de moto y hasta 2 cascos',
+                      selected: _category == 'MOTORCYCLE',
+                      onTap: () => setState(() => _category = 'MOTORCYCLE'),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 14),
+              ],
+              FieldLabel(creating ? 'Nombre del tipo *' : 'Nombre visible'),
+              TextField(
+                controller: _name,
+                maxLength: 40,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(hintText: creating ? 'Ej: Camioneta, Patineta eléctrica' : meta.label, counterText: ''),
+              ),
               const SizedBox(height: 14),
               const FieldLabel('Modelo de cobro'),
               Row(children: [
@@ -354,7 +461,7 @@ class _TariffEditorScreenState extends ConsumerState<TariffEditorScreen> {
             ),
           ],
           const SizedBox(height: 18),
-          PrimaryButton(label: 'GUARDAR TARIFA', icon: Icons.check_circle_outline, large: true, loading: _saving, onPressed: _save),
+          PrimaryButton(label: widget.rule.isNew ? 'AGREGAR TIPO' : 'GUARDAR TARIFA', icon: Icons.check_circle_outline, large: true, loading: _saving, onPressed: _save),
           const SizedBox(height: 8),
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
         ],
@@ -375,6 +482,42 @@ class _MoneyField extends StatelessWidget {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)],
       style: AppText.mono(size: 16),
       decoration: const InputDecoration(prefixText: '\$ ', hintText: '0'),
+    );
+  }
+}
+
+/// Opcion de categoria del tipo de vehiculo (como carro / como moto).
+class _CategoryOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String detail;
+  final bool selected;
+  final VoidCallback onTap;
+  const _CategoryOption({required this.icon, required this.title, required this.detail, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.primaryLight : Colors.white,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: selected ? 1.5 : 1),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, color: selected ? AppColors.primary : AppColors.textSecondary),
+            const SizedBox(height: 6),
+            Text(title, style: AppText.sans(size: 14, weight: FontWeight.w800, color: selected ? AppColors.primary : AppColors.text)),
+            const SizedBox(height: 2),
+            Text(detail, style: AppText.sans(size: 11.5, color: AppColors.textMuted)),
+          ]),
+        ),
+      ),
     );
   }
 }
